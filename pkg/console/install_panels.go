@@ -238,6 +238,8 @@ func showDiskPage(c *Console) error {
 		return err
 	}
 
+	presetConfigDisks(c, diskOptions)
+
 	showPersistentSizeOption := c.config.Install.Role != config.RoleWitness &&
 		(len(diskOptions) == 1 || c.config.Install.DataDisk == c.config.Install.Device)
 
@@ -298,27 +300,36 @@ func getDataDiskOptions(hvstConfig *config.HarvesterConfig) ([]widgets.Option, e
 	return nil, nil
 }
 
+func presetConfigDisks(c *Console, diskOpts []widgets.Option) {
+	if c.config.Install.Device != "" {
+		if c.config.Install.DataDisk != "" {
+			return
+		}
+	}
+	if len(diskOpts) == 0 {
+		return
+	}
+
+	if c.config.Install.Device == "" {
+		c.config.Install.Device = diskOpts[0].Value
+	}
+	if c.config.Install.DataDisk == "" {
+		c.config.Install.DataDisk = c.config.Install.Device
+	}
+}
+
 func addDiskPanel(c *Console) error {
 	diskConfirmed = false
 
 	setLocation := createVerticalLocator(c)
-	diskOpts, err := getDiskOptions()
-	if err != nil {
-		return err
-	}
 
 	// Select device panel
-	diskV, err := widgets.NewDropDown(c.Gui, diskPanel, diskLabel, func() ([]widgets.Option, error) {
-		return diskOpts, nil
-	})
+	diskV, err := widgets.NewDropDown(c.Gui, diskPanel, diskLabel, getDiskOptions)
 	if err != nil {
 		return err
 	}
 	diskV.PreShow = func() error {
-		if c.config.Install.Device == "" {
-			c.config.Install.Device = diskOpts[0].Value
-		}
-		if err := diskV.SetData(c.config.Install.Device); err != nil {
+		if err := diskV.PresetIfEmpty(c.config.Install.Device); err != nil {
 			return err
 		}
 
@@ -341,10 +352,7 @@ func addDiskPanel(c *Console) error {
 	}
 
 	dataDiskV.PreShow = func() error {
-		if c.config.Install.DataDisk == "" {
-			c.config.Install.DataDisk = c.config.Install.Device
-		}
-		return dataDiskV.SetData(c.config.Install.DataDisk)
+		return dataDiskV.PresetIfEmpty(c.config.Install.DataDisk)
 	}
 	setLocation(dataDiskV.Panel, 3)
 	c.AddElement(dataDiskPanel, dataDiskV)
@@ -358,10 +366,6 @@ func addDiskPanel(c *Console) error {
 		c.Cursor = true
 
 		device := c.config.Install.Device
-		if device == "" {
-			device = diskOpts[0].Value
-		}
-
 		//If the user has already set a persistent partition size, use that
 		if persistentSizeV.Value != "" {
 			if c.config.Install.PersistentPartitionSize != "" {
@@ -423,10 +427,12 @@ func addDiskPanel(c *Console) error {
 	}
 	askForceMBRV.PreShow = func() error {
 		c.Cursor = true
+
+		answer := "no"
 		if c.config.ForceMBR {
-			return askForceMBRV.SetData("yes")
+			answer = "yes"
 		}
-		return askForceMBRV.SetData("no")
+		return askForceMBRV.PresetIfEmpty(answer)
 	}
 	setLocation(askForceMBRV.Panel, 3)
 	c.AddElement(askForceMBRPanel, askForceMBRV)
@@ -512,7 +518,10 @@ func addDiskPanel(c *Console) error {
 			return err
 		}
 
-		if c.config.Install.Role != config.RoleWitness {
+		if c.config.Install.Role == config.RoleWitness {
+			c.config.Install.DataDisk = ""
+			dataDiskV.SetData("")
+		} else {
 			// Make sure the persistent partition size is in the correct size.
 			// Do NOT allow proceeding to next field.
 			if valid, err := validatePersistentPartitionSize(c.config.Install.PersistentPartitionSize); !valid || err != nil {
@@ -576,6 +585,10 @@ func addDiskPanel(c *Console) error {
 		}
 		c.config.Install.Device = device
 
+		diskOpts, err := getDiskOptions()
+		if err != nil {
+			return err
+		}
 		if len(diskOpts) > 1 {
 			// Show error if disk size validation fails, but allow proceeding to next field
 			if _, err := validateAllDiskSizes(); err != nil {
@@ -587,6 +600,7 @@ func addDiskPanel(c *Console) error {
 			if device == dataDisk {
 				return showNext(c, persistentSizePanel, dataDiskPanel)
 			}
+			c.CloseElements(persistentSizePanel)
 			return showNext(c, dataDiskPanel)
 		}
 
@@ -702,6 +716,10 @@ func addDiskPanel(c *Console) error {
 		gocui.KeyEnter: persistentSizeConfirm,
 		gocui.KeyArrowUp: func(_ *gocui.Gui, _ *gocui.View) error {
 			diskConfirmed = false
+			diskOpts, err := getDiskOptions()
+			if err != nil {
+				return err
+			}
 			if len(diskOpts) > 1 {
 				if err := updateValidatorMessage(""); err != nil {
 					return err
@@ -752,6 +770,10 @@ func addDiskPanel(c *Console) error {
 			if c.config.Install.Role == config.RoleWitness {
 				return showNext(c, diskPanel)
 			}
+			diskOpts, err := getDiskOptions()
+			if err != nil {
+				return err
+			}
 			if len(diskOpts) > 1 && disk != dataDisk {
 				return showNext(c, dataDiskPanel)
 			}
@@ -801,6 +823,10 @@ func addDiskPanel(c *Console) error {
 
 			if c.config.Install.Role == config.RoleWitness {
 				return showNext(c, diskPanel)
+			}
+			diskOpts, err := getDiskOptions()
+			if err != nil {
+				return err
 			}
 			if len(diskOpts) > 1 && disk != dataDisk {
 				return showNext(c, dataDiskPanel)
