@@ -206,17 +206,24 @@ func (d *DropDown) SetData(data string) error {
 
 	textLen := len(text)
 	if d.InputLen > textLen {
-		v.Write([]byte(text))
+		if _, err = v.Write([]byte(text)); err != nil {
+			return err
+		}
 		for i := 0; i < d.InputLen-textLen-1; i++ {
-			v.Write([]byte{' '})
+			if _, err = v.Write([]byte{' '}); err != nil {
+				return err
+			}
 		}
 	} else {
 		for i := 0; i < d.InputLen-1; i++ {
-			v.Write([]byte{text[i]})
+			if _, err = v.Write([]byte{text[i]}); err != nil {
+				return err
+			}
 		}
 	}
-	v.Write([]byte{'>'})
-
+	if _, err = v.Write([]byte{'>'}); err != nil {
+		return err
+	}
 	return nil
 }
 
