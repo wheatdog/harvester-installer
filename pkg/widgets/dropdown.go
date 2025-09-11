@@ -1,6 +1,9 @@
 package widgets
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/jroimartin/gocui"
 )
 
@@ -54,10 +57,8 @@ func (d *DropDown) Show() error {
 	if err = d.Panel.Show(); err != nil {
 		return err
 	}
-	if d.Select.getOptionsFunc != nil {
-		if d.Select.options, err = d.Select.getOptionsFunc(); err != nil {
-			return err
-		}
+	if err = d.Select.updateOptions(); err != nil {
+		return err
 	}
 	offset := 20
 	if d.Content == "" {
@@ -80,12 +81,16 @@ func (d *DropDown) Show() error {
 		v.Wrap = true
 		v.SelBgColor = gocui.ColorGreen
 		v.SelFgColor = gocui.ColorBlack
-		if d.Value == "" && d.Text == "" && len(d.Select.options) > 0 {
+		if d.Value == "" && d.Text == "" && d.Select.getOptionCount() > 0 {
 			if d.multi {
 				v.Highlight = false
 			} else {
-				d.Value = d.Select.options[0].Value
-				d.Text = d.Select.options[0].Text
+				opt, exists := d.Select.pickOptionByIndex(0)
+				if !exists {
+					return errors.New("should have at least one option")
+				}
+				d.Value = opt.Value
+				d.Text = opt.Text
 			}
 		}
 		err = d.g.SetKeybinding(d.ViewName, gocui.KeyTab, gocui.ModNone, func(_ *gocui.Gui, _ *gocui.View) error {
@@ -106,9 +111,13 @@ func (d *DropDown) Show() error {
 					return nil
 				}
 				_, cy := v.Cursor()
-				if len(d.Select.options) >= cy+1 {
-					d.Value = d.Select.options[cy].Value
-					d.Text = d.Select.options[cy].Text
+				if d.Select.getOptionCount() >= cy+1 {
+					opt, exists := d.Select.pickOptionByIndex(cy)
+					if !exists {
+						return errors.New("should have at least one option")
+					}
+					d.Value = opt.Value
+					d.Text = opt.Text
 				}
 			}
 			if err = d.Select.Close(); err != nil {
@@ -163,6 +172,28 @@ func (d *DropDown) GetMultiData() []string {
 }
 
 func (d *DropDown) SetData(data string) error {
+	if data == "" {
+		d.Value = ""
+		d.Text = ""
+		return nil
+	}
+
+	var text string
+	if d.multi {
+		text = d.Value
+	} else {
+		if err := d.Select.updateOptions(); err != nil {
+			return err
+		}
+		opt, exists := d.Select.pickOptionByValue(data)
+		if !exists {
+			return fmt.Errorf("given data '%s' not found in options", data)
+		}
+		d.Value = opt.Value
+		d.Text = opt.Text
+		text = opt.Text
+	}
+
 	v, err := d.g.View(d.ViewName)
 	if err != nil {
 		// Ignore ErrUnknownView for now
@@ -173,48 +204,34 @@ func (d *DropDown) SetData(data string) error {
 	}
 	v.Clear()
 
-	render := func(text string) error {
-		var err error
-		textLen := len(text)
-		if d.InputLen > textLen {
-			if _, err = v.Write([]byte(text)); err != nil {
-				return err
-			}
-			for i := 0; i < d.InputLen-textLen-1; i++ {
-				if _, err = v.Write([]byte{' '}); err != nil {
-					return err
-				}
-			}
-		} else {
-			for i := 0; i < d.InputLen-1; i++ {
-				if _, err = v.Write([]byte{text[i]}); err != nil {
-					return err
-				}
-			}
+	textLen := len(text)
+	if d.InputLen > textLen {
+		v.Write([]byte(text))
+		for i := 0; i < d.InputLen-textLen-1; i++ {
+			v.Write([]byte{' '})
 		}
-		if _, err = v.Write([]byte{'>'}); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	if d.multi {
-		return render(d.Value)
 	} else {
-		for _, option := range d.Select.options {
-			if option.Value == data {
-				text := option.Text
-				if err := render(text); err != nil {
-					return err
-				}
-				break
-			}
+		for i := 0; i < d.InputLen-1; i++ {
+			v.Write([]byte{text[i]})
 		}
 	}
+	v.Write([]byte{'>'})
+
 	return nil
 }
 
+func (d *DropDown) PresetIfEmpty(value string) error {
+	data, err := d.GetData()
+	if err != nil {
+		return err
+	}
+	if data != "" {
+		return nil
+	}
+	return d.SetData(value)
+}
+
 func (d *DropDown) Reset() {
-	d.Select.selectedIndexes = []bool{}
+	d.Select.Reset()
 	d.Value = ""
 }
