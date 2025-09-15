@@ -301,10 +301,8 @@ func getDataDiskOptions(hvstConfig *config.HarvesterConfig) ([]widgets.Option, e
 }
 
 func presetConfigDisks(c *Console, diskOpts []widgets.Option) {
-	if c.config.Install.Device != "" {
-		if c.config.Install.DataDisk != "" {
-			return
-		}
+	if c.config.Install.Device != "" && c.config.Install.DataDisk != "" {
+		return
 	}
 	if len(diskOpts) == 0 {
 		return
