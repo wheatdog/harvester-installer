@@ -1113,12 +1113,14 @@ func Test_identifyUniqueDisks(t *testing.T) {
 	assert := require.New(t)
 	out, err := identifyUniqueDisks([]byte(raidDisks))
 	assert.NoError(err, "expected no error while parsing disk data")
+	assert.Equal([]string{"sda 447.1G", "sdb 447.1G"}, out)
 	t.Log(out)
 }
 
-func Test_identifyUniqueDisksWithHarvesterInstall(t *testing.T) {
+func Test_filterHarvesterInstallDisks(t *testing.T) {
 	assert := require.New(t)
 	results, err := filterHarvesterInstallDisks([]byte(existingHarvesterInstalls))
 	assert.NoError(err, "expected no error while parsing disk data")
 	assert.Len(results, 1, "expected to find 1 disk from sample data")
+	assert.Equal([]string{"sdc 250G"}, results)
 }

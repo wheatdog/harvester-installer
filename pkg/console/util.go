@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1057,6 +1058,9 @@ func identifyUniqueDisks(output []byte) ([]string, error) {
 		returnDisks = append(returnDisks, generateDiskEntry(v))
 	}
 
+	// ordered result makes the stable item list on the downstream DropDown widget
+	sort.Strings(returnDisks)
+
 	return returnDisks, nil
 }
 
@@ -1145,7 +1149,6 @@ func getWipeDisksOptions(hvstConfig *config.HarvesterConfig) ([]widgets.Option, 
 // identifyUniqueDisksWithHarvesterInstall will identify disks which may already be in use with old Harvester
 // installs. This is done by check if a label with prefix COS exists on any of the partitions
 // and only those disks are returned for getWipeDiskOptions
-
 func identifyUniqueDisksWithHarvesterInstall() ([]string, error) {
 	output, err := exec.Command("/bin/sh", "-c", `lsblk -J -o NAME,SIZE,TYPE,WWN,SERIAL,LABEL`).CombinedOutput()
 	if err != nil {
@@ -1167,6 +1170,10 @@ func filterHarvesterInstallDisks(output []byte) ([]string, error) {
 			returnedDisks = append(returnedDisks, generateDiskEntry(device))
 		}
 	}
+
+	// ordered result makes the stable item list on the downstream DropDown widget
+	sort.Strings(returnedDisks)
+
 	return returnedDisks, nil
 }
 
