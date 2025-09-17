@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/jroimartin/gocui"
-	"github.com/sirupsen/logrus"
 )
 
 type Option struct {
@@ -13,21 +12,18 @@ type Option struct {
 	Text  string
 }
 
-type OptionState struct {
-	option   Option
-	selected bool
-}
-
 type GetOptionsFunc func() ([]Option, error)
 
 type Select struct {
 	*Panel
-	Value           string
-	getOptionsFunc  GetOptionsFunc
+	Value          string
+	getOptionsFunc GetOptionsFunc
+	options        []Option
+
+	// For multiselect
+	values          []string
 	multi           bool
-	optionState     map[string]OptionState
-	orderedValues   []string
-	selectedValues  []string
+	selectedIndexes []bool
 }
 
 func NewSelect(g *gocui.Gui, name string, text string, getOptionsFunc GetOptionsFunc) (*Select, error) {
@@ -55,7 +51,7 @@ func (s *Select) Show() error {
 		offset = len(strings.Split(s.Content, "\n")) + 1
 	}
 	y0 := s.Y0 + offset
-	y1 := s.Y0 + offset + len(s.orderedValues) + 1
+	y1 := s.Y0 + offset + len(s.options) + 1
 	v, err := s.g.SetView(optionViewName, s.X0, y0, s.X1, y1)
 	if err != nil {
 		if err != gocui.ErrUnknownView {
@@ -65,6 +61,10 @@ func (s *Select) Show() error {
 		v.Wrap = true
 
 		if s.multi {
+			// Initialize multiselect view
+			if len(s.selectedIndexes) == 0 {
+				s.selectedIndexes = make([]bool, len(s.options))
+			}
 			if err = s.updateSelectedStatus(v); err != nil {
 				return err
 			}
@@ -72,25 +72,8 @@ func (s *Select) Show() error {
 			v.Highlight = true
 			v.SelBgColor = gocui.ColorGreen
 			v.SelFgColor = gocui.ColorBlack
-
-			foundOptIdx := -1
-			for idx, value := range s.orderedValues {
-				opt := s.optionState[value].option
+			for _, opt := range s.options {
 				if _, err := fmt.Fprintln(v, opt.Text); err != nil {
-					return err
-				}
-				if value == s.Value {
-					foundOptIdx = idx
-				}
-			}
-
-			// cursor should point to the current value if not empty
-			if s.Value != "" {
-				if foundOptIdx == -1 {
-					return fmt.Errorf("'%s' not found in options", s.Value)
-				}
-				ox, oy := v.Origin()
-				if err := v.SetCursor(ox, oy+foundOptIdx); err != nil {
 					return err
 				}
 			}
@@ -111,7 +94,12 @@ func (s *Select) Show() error {
 			}
 		}
 	}
-	return nil
+
+	if s.multi {
+		return nil
+	}
+	return s.SetData(s.Value)
+
 }
 
 func (s *Select) Close() error {
@@ -147,21 +135,48 @@ func (s *Select) GetData() (string, error) {
 	}
 	_, cy := ov.Cursor()
 	var value string
-	if len(s.orderedValues) >= cy+1 {
-		value = s.orderedValues[cy]
+	if len(s.options) >= cy+1 {
+		value = s.options[cy].Value
 	}
 	return value, nil
 }
 
 func (s *Select) GetMultiData() []string {
-	return s.selectedValues
+	return s.values
 }
 
-func (s *Select) Reset() {
-	s.Value = ""
-	s.optionState = nil
-	s.orderedValues = nil
-	s.selectedValues = nil
+func (s *Select) SetData(data string) error {
+	if data == "" {
+		s.Value = ""
+		return nil
+	}
+	if err := s.updateOptions(); err != nil {
+		return err
+	}
+
+	var foundOptIdx = -1
+	for i, option := range s.options {
+		if option.Value == data {
+			foundOptIdx = i
+			s.Value = option.Value
+			break
+		}
+	}
+	if foundOptIdx == -1 {
+		return fmt.Errorf("given data '%s' not found in options", data)
+	}
+
+	optionViewName := s.Name + "-options"
+	ov, err := s.g.View(optionViewName)
+	if err != nil {
+		if err != gocui.ErrUnknownView {
+			return err
+		}
+		return nil
+	}
+
+	ox, oy := ov.Origin()
+	return ov.SetCursor(ox, oy+foundOptIdx)
 }
 
 func (s *Select) updateSelectedStatus(v *gocui.View) error {
@@ -171,18 +186,17 @@ func (s *Select) updateSelectedStatus(v *gocui.View) error {
 		return err
 	}
 	values := make([]string, 0)
-	for _, value := range s.orderedValues {
+	for i, opt := range s.options {
 		selected := " "
-		state := s.optionState[value]
-		if state.selected {
+		if s.selectedIndexes[i] {
 			selected = "x"
-			values = append(values, value)
+			values = append(values, opt.Value)
 		}
-		if _, err := fmt.Fprintf(v, "[%s] %s\n", selected, state.option.Text); err != nil {
+		if _, err := fmt.Fprintf(v, "[%s] %s\n", selected, opt.Text); err != nil {
 			return err
 		}
 	}
-	s.selectedValues = values
+	s.values = values
 	s.Value = strings.Join(values, ",")
 	return nil
 }
@@ -194,11 +208,8 @@ func (s *Select) setOptionsKeyBindings(viewName string) error {
 	if s.multi {
 		handler := func(_ *gocui.Gui, v *gocui.View) error {
 			_, cy := v.Cursor()
-			if len(s.orderedValues) >= cy+1 {
-				value := s.orderedValues[cy]
-				state := s.optionState[value]
-				state.selected = !state.selected
-				s.optionState[value] = state
+			if len(s.options) >= cy+1 {
+				s.selectedIndexes[cy] = !s.selectedIndexes[cy]
 			}
 			return s.updateSelectedStatus(v)
 		}
@@ -220,56 +231,11 @@ func setOptionsKeyBindings(g *gocui.Gui, viewName string) error {
 }
 
 func (s *Select) updateOptions() error {
-	if s.getOptionsFunc == nil {
-		return nil
-	}
-
-	options, err := s.getOptionsFunc();
-	if err != nil {
-		return err
-	}
-
-	s.orderedValues = make([]string, 0, len(options))
-	newOptionState := make(map[string]OptionState, len(options))
-	for _, opt := range(options) {
-		s.orderedValues = append(s.orderedValues, opt.Value)
-		state := s.optionState[opt.Value]
-		state.option = opt
-		newOptionState[opt.Value] = state
-	}
-	s.optionState = newOptionState
-
-	newSelectedValues := make([]string, 0, len(s.selectedValues))
-	for _, value := range(s.selectedValues) {
-		if _, exists := s.optionState[value]; !exists {
-			logrus.Warnf("value '%s' not found in options after updating", value)
-			continue
+	var err error
+	if s.getOptionsFunc != nil {
+		if s.options, err = s.getOptionsFunc(); err != nil {
+			return err
 		}
-		newSelectedValues = append(newSelectedValues, value)
 	}
-	s.selectedValues = newSelectedValues
-
-	if _, exists := s.optionState[s.Value]; s.Value != "" && !exists {
-		logrus.Warnf("value '%s' not found in options after updating", s.Value)
-		s.Value = ""
-	}
-
 	return nil
-}
-
-func (s *Select) pickOptionByValue(value string) (Option, bool) {
-	state, exists := s.optionState[value]
-	return state.option, exists
-}
-
-func (s *Select) pickOptionByIndex(idx int) (Option, bool) {
-	if idx < 0 || idx >= len(s.orderedValues) {
-		return Option{}, false
-	}
-	value := s.orderedValues[idx]
-	return s.pickOptionByValue(value)
-}
-
-func (s *Select) getOptionCount() int {
-	return len(s.orderedValues)
 }
