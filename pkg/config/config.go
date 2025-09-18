@@ -197,6 +197,7 @@ type File struct {
 
 type OS struct {
 	AfterInstallChrootCommands []string `json:"afterInstallChrootCommands,omitempty"`
+	AfterUpgradeChrootCommands []string `json:"afterUpgradeChrootCommands,omitempty"`
 	SSHAuthorizedKeys          []string `json:"sshAuthorizedKeys,omitempty"`
 	WriteFiles                 []File   `json:"writeFiles,omitempty"`
 	Hostname                   string   `json:"hostname,omitempty"`
