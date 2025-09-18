@@ -62,6 +62,7 @@ var (
 	installModeOnly   bool
 	diskConfirmed     bool
 	preflightWarnings []string
+	diskOptionCache   *DiskOptionsCache = NewDiskOptionsCache()
 )
 
 func (c *Console) doNetworkSpeedCheck(interfaces []config.NetworkInterface) (warnings []string) {
@@ -233,10 +234,11 @@ func addFooterPanel(c *Console) error {
 func showDiskPage(c *Console) error {
 	diskConfirmed = false
 
-	diskOptions, err := getDiskOptions()
-	if err != nil {
+	if err := diskOptionCache.fetch(); err != nil {
 		return err
 	}
+
+	diskOptions := diskOptionCache.getAllValidDiskOptions()
 
 	presetConfigDisks(c, diskOptions)
 
@@ -273,33 +275,6 @@ func calculateDefaultPersistentSize(dev string) (string, error) {
 	return fmt.Sprintf("%dGi", defaultSize), nil
 }
 
-func getDataDiskOptions(hvstConfig *config.HarvesterConfig) ([]widgets.Option, error) {
-	// Show the OS disk as "Use the installation disk (<Disk Name>)"
-	deviceForOS := hvstConfig.Install.Device
-	diskOpts, err := getDiskOptions()
-	if err != nil {
-		return nil, err
-	}
-	if deviceForOS == "" {
-		diskOpts[0].Text = fmt.Sprintf("Use the installation disk (%s)", diskOpts[0].Text)
-		return diskOpts, nil
-	}
-
-	for i, diskOpt := range diskOpts {
-		if diskOpt.Value == deviceForOS {
-			osDiskOpt := widgets.Option{
-				Text:  fmt.Sprintf("Use the installation disk (%s)", diskOpt.Text),
-				Value: diskOpt.Value,
-			}
-			diskOpts = append(diskOpts[:i], diskOpts[i+1:]...)
-			diskOpts = append([]widgets.Option{osDiskOpt}, diskOpts...)
-			return diskOpts, nil
-		}
-	}
-	logrus.Warnf("device '%s' not found in disk options", deviceForOS)
-	return nil, nil
-}
-
 func presetConfigDisks(c *Console, diskOpts []widgets.Option) {
 	if c.config.Install.Device != "" && c.config.Install.DataDisk != "" {
 		return
@@ -322,7 +297,9 @@ func addDiskPanel(c *Console) error {
 	setLocation := createVerticalLocator(c)
 
 	// Select device panel
-	diskV, err := widgets.NewDropDown(c.Gui, diskPanel, diskLabel, getDiskOptions)
+	diskV, err := widgets.NewDropDown(c.Gui, diskPanel, diskLabel, func() ([]widgets.Option, error) {
+		return diskOptionCache.getAllValidDiskOptions(), nil
+	})
 	if err != nil {
 		return err
 	}
@@ -343,7 +320,7 @@ func addDiskPanel(c *Console) error {
 	c.AddElement(diskPanel, diskV)
 
 	dataDiskV, err := widgets.NewDropDown(c.Gui, dataDiskPanel, dataDiskLabel, func() ([]widgets.Option, error) {
-		return getDataDiskOptions(c.config)
+		return diskOptionCache.getDataDiskOptions(c.config), nil
 	})
 	if err != nil {
 		return err
@@ -395,7 +372,7 @@ func addDiskPanel(c *Console) error {
 	c.AddElement(wipeDisksTitlePanel, wipeDisksTitlePanelV)
 
 	wipeDisksV, err := widgets.NewDropDown(c.Gui, wipeDisksPanel, wipeDisksLabel, func() ([]widgets.Option, error) {
-		return getWipeDisksOptions(c.config)
+		return diskOptionCache.getWipeDisksOptions(c.config), nil
 	})
 	if err != nil {
 		return err
@@ -545,10 +522,7 @@ func addDiskPanel(c *Console) error {
 	// if there are no additional disks to wipe then it checks if MBR needs to be enabled
 	// else will move on to the next apge
 	isWipeDisksPanelNeeded := func(g *gocui.Gui, v *gocui.View) error {
-		options, err := getWipeDisksOptions(c.config)
-		if err != nil {
-			return err
-		}
+		options := diskOptionCache.getWipeDisksOptions(c.config)
 		if len(options) != 0 {
 			if slices.Contains(c.config.WipeDisksList, c.config.Device) || slices.Contains(c.config.WipeDisksList, c.config.DataDisk) {
 				c.config.WipeDisksList = []string{}
@@ -583,10 +557,7 @@ func addDiskPanel(c *Console) error {
 		}
 		c.config.Install.Device = device
 
-		diskOpts, err := getDiskOptions()
-		if err != nil {
-			return err
-		}
+		diskOpts := diskOptionCache.getAllValidDiskOptions()
 		if len(diskOpts) > 1 {
 			// Show error if disk size validation fails, but allow proceeding to next field
 			if _, err := validateAllDiskSizes(); err != nil {
@@ -714,10 +685,7 @@ func addDiskPanel(c *Console) error {
 		gocui.KeyEnter: persistentSizeConfirm,
 		gocui.KeyArrowUp: func(_ *gocui.Gui, _ *gocui.View) error {
 			diskConfirmed = false
-			diskOpts, err := getDiskOptions()
-			if err != nil {
-				return err
-			}
+			diskOpts := diskOptionCache.getAllValidDiskOptions()
 			if len(diskOpts) > 1 {
 				if err := updateValidatorMessage(""); err != nil {
 					return err
@@ -768,10 +736,7 @@ func addDiskPanel(c *Console) error {
 			if c.config.Install.Role == config.RoleWitness {
 				return showNext(c, diskPanel)
 			}
-			diskOpts, err := getDiskOptions()
-			if err != nil {
-				return err
-			}
+			diskOpts := diskOptionCache.getAllValidDiskOptions()
 			if len(diskOpts) > 1 && disk != dataDisk {
 				return showNext(c, dataDiskPanel)
 			}
@@ -822,10 +787,7 @@ func addDiskPanel(c *Console) error {
 			if c.config.Install.Role == config.RoleWitness {
 				return showNext(c, diskPanel)
 			}
-			diskOpts, err := getDiskOptions()
-			if err != nil {
-				return err
-			}
+			diskOpts := diskOptionCache.getAllValidDiskOptions()
 			if len(diskOpts) > 1 && disk != dataDisk {
 				return showNext(c, dataDiskPanel)
 			}
