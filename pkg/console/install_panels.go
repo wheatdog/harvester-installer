@@ -304,7 +304,7 @@ func addDiskPanel(c *Console) error {
 		return err
 	}
 	diskV.PreShow = func() error {
-		if err := diskV.PresetIfEmpty(c.config.Install.Device); err != nil {
+		if err := diskV.SetData(c.config.Install.Device); err != nil {
 			return err
 		}
 
@@ -327,7 +327,7 @@ func addDiskPanel(c *Console) error {
 	}
 
 	dataDiskV.PreShow = func() error {
-		return dataDiskV.PresetIfEmpty(c.config.Install.DataDisk)
+		return dataDiskV.SetData(c.config.Install.DataDisk)
 	}
 	setLocation(dataDiskV.Panel, 3)
 	c.AddElement(dataDiskPanel, dataDiskV)
@@ -403,11 +403,10 @@ func addDiskPanel(c *Console) error {
 	askForceMBRV.PreShow = func() error {
 		c.Cursor = true
 
-		answer := "no"
 		if c.config.ForceMBR {
-			answer = "yes"
+			return askForceMBRV.SetData("yes")
 		}
-		return askForceMBRV.PresetIfEmpty(answer)
+		return askForceMBRV.SetData("no")
 	}
 	setLocation(askForceMBRV.Panel, 3)
 	c.AddElement(askForceMBRPanel, askForceMBRV)

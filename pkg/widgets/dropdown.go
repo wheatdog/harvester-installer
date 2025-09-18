@@ -218,14 +218,3 @@ func (d *DropDown) Reset() {
 	d.Select.selectedIndexes = []bool{}
 	d.Value = ""
 }
-
-func (d *DropDown) PresetIfEmpty(value string) error {
-	data, err := d.GetData()
-	if err != nil {
-		return err
-	}
-	if data != "" {
-		return nil
-	}
-	return d.SetData(value)
-}
