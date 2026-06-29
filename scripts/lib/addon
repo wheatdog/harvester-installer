@@ -12,7 +12,7 @@ load_and_source_addon() {
     return 1
   fi
   if [[ -z ${git} ]]; then
-    git=https://github.com/harvester/addons.git
+    git=https://github.com/wheatdog/addons.git
     echo "Use default git path ${git}"
   fi
   if [[ -z ${branch} ]]; then
